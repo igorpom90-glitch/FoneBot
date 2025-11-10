@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # ---------------------- LOG -----------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -18,8 +18,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 
 PRICE_MIN = 50.0
 PRICE_MAX = 70.0
-SYNC_INTERVAL = 600  # 10 minutos em segundos
-
+ACTIVE_INTERVAL = 600  # 10 minutos
 URLS = json.loads(os.environ.get("PRODUCT_URLS_JSON", "[]"))
 STATE_FILE = "state.json"
 
@@ -27,6 +26,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
                   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15A372 Safari/604.1"
 }
+
+# Fuso horário de Campos dos Goytacazes
+BR_TZ = timezone(timedelta(hours=-3))
 
 # ---------------------- FUNÇÕES -----------------------
 def send_telegram(message: str):
@@ -68,50 +70,34 @@ def save_state(state):
 # ---------------------- MONITOR -----------------------
 def monitor():
     state = load_state()
-    today = None
-    deu_certo_enviado = False
+    logging.info("Loop de monitoramento iniciado.")
 
     while True:
-        agora = datetime.now()
+        now = datetime.now(BR_TZ)
+        current_time_str = now.strftime("%H:%M:%S")
+        message_base = f"🤖 Ainda estou ativo - {current_time_str}"
 
-        # ---------- Reset diário ----------
-        if today != agora.date():
-            today = agora.date()
-            send_telegram(f"📅 Dia {today.strftime('%d/%m/%Y')}, irei começar a mandar os updates que ainda estou vivo de 10 em 10 minutos")
-
-        # ---------- Mensagem única teste ----------
-        if not deu_certo_enviado and agora.hour == 21 and agora.minute == 34:
-            send_telegram("✅ deu certo")
-            deu_certo_enviado = True
-
-        # ---------- Sincronização de mensagem "ainda estou vivo" ----------
-        minutos_passados = agora.hour * 60 + agora.minute
-        if minutos_passados % (SYNC_INTERVAL // 60) == 0:  # múltiplo de 10 minutos
-            send_telegram("🤖 Ainda estou ativo e monitorando preços...")
-
-        # ---------- Checa preços ----------
-        achados = []
+        encontrados = []
         for loja in URLS:
             nome = loja.get("name", "Loja desconhecida")
             url = loja.get("url", "")
             price = fetch_price(url)
+            if price is None:
+                continue
+            if PRICE_MIN <= price <= PRICE_MAX:
+                encontrados.append(f"🏪 {nome} - R$ {price:.2f}\n{url}")
+                state[nome] = price
 
-            if price and PRICE_MIN <= price <= PRICE_MAX:
-                achados.append((nome, price, url))
-                # Atualiza estado
-                last_price = state.get(nome)
-                if last_price != price:
-                    state[nome] = price
-                    save_state(state)
+        save_state(state)
 
-        # ---------- Envia mensagens ----------
-        if achados:
-            for nome, price, url in achados:
-                send_telegram(f"✅ Produto encontrado!\n🏪 {nome}\n💰 R$ {price:.2f}\n{url}")
+        # ---------- Mensagem final ----------
+        if encontrados:
+            for item in encontrados:
+                send_telegram(f"{message_base}\n✅ Achei promoção do fone!\n{item}")
         else:
-            send_telegram("🤖 Ainda estou vivo, promoção não encontrada em nenhuma loja")
+            send_telegram(f"{message_base}, promoção do fone não encontrada em nenhuma loja ❌")
 
-        time.sleep(60)  # loop rápido para não perder o intervalo sincronizado
+        time.sleep(ACTIVE_INTERVAL)
 
 # ---------------------- SERVIDOR WEB -----------------------
 app = Flask(__name__)
@@ -127,7 +113,6 @@ def start_web():
 
 # ---------------------- MAIN -----------------------
 if __name__ == "__main__":
-    send_telegram("🤖 Bot iniciado. Monitorando preços e enviando sinal de atividade sincronizado a cada 10 minutos.")
-    
+    send_telegram("🤖 Bot do fone iniciado. Mensagens de status a cada 10 minutos.")
     threading.Thread(target=monitor, daemon=True).start()
     start_web()
