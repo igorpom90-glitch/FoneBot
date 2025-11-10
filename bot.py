@@ -1,4 +1,3 @@
-
 import os
 import time
 import json
@@ -16,12 +15,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-PRICE_MIN = 300.0
-PRICE_MAX = 600.0
-CHECK_INTERVAL = int(os.environ.get("POLL_INTERVAL", "900"))  # checagem a cada 15 minutos
+PRICE_MIN = 50.0   # atualizado para o fone
+PRICE_MAX = 70.0   # atualizado para o fone
+CHECK_INTERVAL = int(os.environ.get("POLL_INTERVAL", "900"))
 
 URLS = json.loads(os.environ.get("PRODUCT_URLS_JSON", "[]"))
-STATE_FILE = "state_redmi.json"
+
+STATE_FILE = "state.json"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
@@ -75,6 +75,7 @@ def monitor():
             nome = loja.get("name", "Loja desconhecida")
             url = loja.get("url", "")
             price = fetch_price(url)
+
             if price is None:
                 continue
 
@@ -84,11 +85,11 @@ def monitor():
             if last_price != price:
                 state[nome] = price
                 save_state(state)
-                send_telegram(f"🔔 Preço atualizado!\n🏪 {nome}\n💰 R$ {price:.2f}\n{url}")
+                logging.info(f"Preço atualizado em {nome}: R$ {price:.2f}")
 
             # ---------- Mensagem se preço estiver na faixa ----------
             if PRICE_MIN <= price <= PRICE_MAX:
-                send_telegram(f"✅ Achei {nome} por R$ {price:.2f}!\n{url}")
+                send_telegram(f"✅ Achei produto dentro da faixa!\n🏪 {nome}\n💰 R$ {price:.2f}\n{url}")
 
         time.sleep(CHECK_INTERVAL)
 
@@ -97,7 +98,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot Redmi Buds 6 Play rodando ✅"
+    return "Bot rodando ✅"
 
 def start_web():
     port = int(os.environ.get("PORT", 8080))
@@ -106,10 +107,10 @@ def start_web():
 
 # ---------------------- MAIN -----------------------
 if __name__ == "__main__":
-    send_telegram("🤖 Bot Redmi Buds 6 Play iniciado. Monitorando preços entre R$300 e R$600.")
-    
+    send_telegram("🤖 Bot de Xiaomi Redmi Buds 6 Play iniciado. Monitorando preços entre R$50 e R$70.")
+
     # Inicia monitoramento em thread separada
     threading.Thread(target=monitor, daemon=True).start()
-    
+
     # Inicia Flask
     start_web()
