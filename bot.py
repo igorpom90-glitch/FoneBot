@@ -18,7 +18,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 
 PRICE_MIN = 50.0
 PRICE_MAX = 70.0
-INTERVAL = 600  # 10 minutos em segundos
+SYNC_INTERVAL = 600  # 10 minutos em segundos
 
 URLS = json.loads(os.environ.get("PRODUCT_URLS_JSON", "[]"))
 STATE_FILE = "state.json"
@@ -69,7 +69,7 @@ def save_state(state):
 def monitor():
     state = load_state()
     today = None
-    deu_certo_enviado = False  # Controle para enviar apenas uma vez
+    deu_certo_enviado = False
 
     while True:
         agora = datetime.now()
@@ -78,31 +78,40 @@ def monitor():
         if today != agora.date():
             today = agora.date()
             send_telegram(f"📅 Dia {today.strftime('%d/%m/%Y')}, irei começar a mandar os updates que ainda estou vivo de 10 em 10 minutos")
-        
-        # ---------- Mensagem única para teste 21:34 ----------
+
+        # ---------- Mensagem única teste ----------
         if not deu_certo_enviado and agora.hour == 21 and agora.minute == 34:
             send_telegram("✅ deu certo")
             deu_certo_enviado = True
 
-        # ---------- Checa preços e envia mensagens ----------
+        # ---------- Sincronização de mensagem "ainda estou vivo" ----------
+        minutos_passados = agora.hour * 60 + agora.minute
+        if minutos_passados % (SYNC_INTERVAL // 60) == 0:  # múltiplo de 10 minutos
+            send_telegram("🤖 Ainda estou ativo e monitorando preços...")
+
+        # ---------- Checa preços ----------
+        achados = []
         for loja in URLS:
             nome = loja.get("name", "Loja desconhecida")
             url = loja.get("url", "")
             price = fetch_price(url)
-            
-            if price is None or not (PRICE_MIN <= price <= PRICE_MAX):
-                send_telegram(f"🤖 Ainda estou vivo, promoção não encontrada em {nome}")
-            else:
-                send_telegram(f"✅ Ainda estou vivo, produto {nome} a preço R$ {price:.2f} na loja {nome}\n{url}")
-            
-            # Atualiza estado
-            last_price = state.get(nome)
-            if price and last_price != price:
-                state[nome] = price
-                save_state(state)
 
-        # Espera o intervalo antes da próxima execução
-        time.sleep(INTERVAL)
+            if price and PRICE_MIN <= price <= PRICE_MAX:
+                achados.append((nome, price, url))
+                # Atualiza estado
+                last_price = state.get(nome)
+                if last_price != price:
+                    state[nome] = price
+                    save_state(state)
+
+        # ---------- Envia mensagens ----------
+        if achados:
+            for nome, price, url in achados:
+                send_telegram(f"✅ Produto encontrado!\n🏪 {nome}\n💰 R$ {price:.2f}\n{url}")
+        else:
+            send_telegram("🤖 Ainda estou vivo, promoção não encontrada em nenhuma loja")
+
+        time.sleep(60)  # loop rápido para não perder o intervalo sincronizado
 
 # ---------------------- SERVIDOR WEB -----------------------
 app = Flask(__name__)
@@ -118,7 +127,7 @@ def start_web():
 
 # ---------------------- MAIN -----------------------
 if __name__ == "__main__":
-    send_telegram("🤖 Bot iniciado. Monitorando preços e enviando sinal de atividade diariamente a partir da meia-noite.")
+    send_telegram("🤖 Bot iniciado. Monitorando preços e enviando sinal de atividade sincronizado a cada 10 minutos.")
     
     threading.Thread(target=monitor, daemon=True).start()
     start_web()
